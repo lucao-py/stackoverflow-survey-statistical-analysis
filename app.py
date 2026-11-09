@@ -7,7 +7,7 @@ import streamlit as st
 from scipy.stats import gaussian_kde
 
 from src.dados import carregar_dados, URL_DADOS
-from src.visualizacoes import grafico_ic_barras, grafico_decisao_testes
+from src.visualizacoes import PLOT_LOCK, grafico_ic_barras, grafico_decisao_testes
 from src.amostragem import dimensionar_amostra, selecionar_amostra
 from src.estatisticas import (
     intervalo_proporcao, intervalo_media, teste_proporcao, teste_media
@@ -138,9 +138,10 @@ def mostrar_ic(titulo, ic, populacao, percentual, formula):
     """Exibe as barras horizontais no formato da referência, sem cards de KPIs."""
     with st.container(border=True):
         st.markdown(f"#### {titulo}")
-        figura = grafico_ic_barras(ic, populacao, percentual=percentual)
-        st.pyplot(figura, use_container_width=True)
-        plt.close(figura)
+        with PLOT_LOCK:
+            figura = grafico_ic_barras(ic, populacao, percentual=percentual)
+            st.pyplot(figura, width="stretch", alt=f"Comparação populacional e IC de {titulo}")
+            plt.close(figura)
         st.latex(formula)
 
 
@@ -271,9 +272,10 @@ testes = [
     },
 ]
 
-figura_testes = grafico_decisao_testes(testes)
-st.pyplot(figura_testes, use_container_width=True)
-plt.close(figura_testes)
+with PLOT_LOCK:
+    figura_testes = grafico_decisao_testes(testes)
+    st.pyplot(figura_testes, width="stretch", alt="Quatro testes de hipóteses, valores-p e decisões")
+    plt.close(figura_testes)
 
 st.divider()
 st.caption(
