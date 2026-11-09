@@ -1,5 +1,7 @@
 """Visualizações da inferência para o painel Streamlit (Matplotlib)."""
 
+from threading import RLock
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
@@ -12,6 +14,7 @@ POPULACAO = "#667F9B"
 AMOSTRA = "#4E9CDB"
 DESTAQUE = "#2DD4BF"
 LIMIAR = "#FBBF24"
+PLOT_LOCK = RLock()
 
 
 def _pt(valor, casas=2):
