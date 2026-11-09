@@ -1,13 +1,15 @@
 """Dashboard narrativo: população, amostra e inferência no Survey 2025."""
 
 import numpy as np
-import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import streamlit as st
 from scipy.stats import gaussian_kde
 
 from src.dados import carregar_dados, URL_DADOS
-from src.visualizacoes import PLOT_LOCK, grafico_ic_barras, grafico_decisao_testes
+from src.visualizacoes import (
+    AMOSTRA, POPULACAO, CONFIG_GRAFICOS, estilizar,
+    grafico_ic_barras, grafico_decisao_testes,
+)
 from src.amostragem import dimensionar_amostra, selecionar_amostra
 from src.estatisticas import (
     intervalo_proporcao, intervalo_media, teste_proporcao, teste_media
@@ -20,7 +22,25 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-POP, AMOSTRA, REAL = "#94A3B8", "#2DD4BF", "#FBBF24"
+POP = POPULACAO
+
+st.html("""
+<style>
+.st-key-painel_populacao, .st-key-painel_amostra,
+.st-key-painel_ic_proporcao, .st-key-painel_ic_media,
+.st-key-dimensionamento {
+    background: #151C25;
+    border-color: #293442;
+    border-radius: 12px;
+}
+.st-key-painel_populacao [data-testid="stMetricValue"],
+.st-key-painel_amostra [data-testid="stMetricValue"] {
+    font-size: clamp(1.25rem, 2.5vw, 2rem);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.3;
+}
+</style>
+""")
 
 
 def num(valor, casas=0):
@@ -33,22 +53,6 @@ def pct(valor):
 
 def p_texto(valor):
     return "< 0,0001" if valor < 0.0001 else num(valor, 4)
-
-
-def estilizar(fig, altura=300, legenda=True):
-    fig.update_layout(
-        template="plotly_dark",
-        height=altura,
-        margin=dict(l=5, r=12, t=22, b=10),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        showlegend=legenda,
-        legend=dict(orientation="h", y=1.16),
-    )
-    fig.update_xaxes(showgrid=True, gridcolor="rgba(148,163,184,0.12)")
-    fig.update_yaxes(showgrid=False)
-    return fig
-
 
 
 IA_LABELS = {
@@ -74,7 +78,8 @@ def painel_descritivo(base, titulo, cor):
     experiencia = base["WorkExp"].dropna()
     ia = base["AISelect"].dropna()
 
-    with st.container(border=True):
+    chave = "populacao" if titulo == "População" else "amostra"
+    with st.container(border=True, key=f"painel_{chave}"):
         st.subheader(titulo)
         c1, c2 = st.columns(2)
         c1.metric("Respondentes", num(len(base)))
@@ -95,9 +100,12 @@ def painel_descritivo(base, titulo, cor):
         eixo, curva = curva_distribuicao(experiencia)
         fig.add_trace(go.Scatter(
             x=eixo, y=curva, mode="lines",
-            name="Curva de distribuição (KDE)",
+            name="Curva KDE",
             line=dict(color=cor, width=3),
-            hovertemplate="%{x:.0f} anos: %{y:.2f}%<extra></extra>",
+            hovertemplate=(
+                "<b>Curva de distribuição (KDE)</b><br>"
+                "%{x:.0f} anos: %{y:.2f}%<extra></extra>"
+            ),
         ))
         fig.update_layout(
             xaxis_title="Anos de experiência",
@@ -105,7 +113,10 @@ def painel_descritivo(base, titulo, cor):
             xaxis_range=[0, 50],
             legend=dict(orientation="h", x=0, y=1.12),
         )
-        st.plotly_chart(estilizar(fig, 320, legenda=True), width="stretch")
+        st.plotly_chart(
+            estilizar(fig, 340, legenda=True), width="stretch",
+            theme=None, config=CONFIG_GRAFICOS,
+        )
 
         st.markdown("**Frequência de utilização de IA**")
         frequencias = (
@@ -120,7 +131,7 @@ def painel_descritivo(base, titulo, cor):
         fig = go.Figure(go.Bar(
             x=porcentagens.values,
             y=ordem, orientation="h", marker_color=cor,
-            text=[f"{valor:.1f}%" for valor in porcentagens.values],
+            text=[f"\u2002{num(valor, 1)}%" for valor in porcentagens.values],
             textposition="outside",
             textfont=dict(color="#E5E7EB", size=12),
             cliponaxis=False,
@@ -131,17 +142,31 @@ def painel_descritivo(base, titulo, cor):
             xaxis_range=[0, max(10, float(porcentagens.max()) * 1.28)],
             yaxis=dict(categoryorder="array", categoryarray=list(reversed(ordem))),
         )
-        st.plotly_chart(estilizar(fig, 280, legenda=False), width="stretch")
+        st.plotly_chart(
+            estilizar(fig, 280, legenda=False), width="stretch",
+            theme=None, config=CONFIG_GRAFICOS,
+        )
 
 
 def mostrar_ic(titulo, ic, populacao, percentual, formula):
     """Exibe as barras horizontais no formato da referência, sem cards de KPIs."""
-    with st.container(border=True):
+    chave = "proporcao" if percentual else "media"
+    with st.container(border=True, key=f"painel_ic_{chave}"):
         st.markdown(f"#### {titulo}")
-        with PLOT_LOCK:
-            figura = grafico_ic_barras(ic, populacao, percentual=percentual)
-            st.pyplot(figura, width="stretch", alt=f"Comparação populacional e IC de {titulo}")
-            plt.close(figura)
+        st.plotly_chart(
+            grafico_ic_barras(ic, populacao, percentual=percentual),
+            width="stretch", theme=None, config=CONFIG_GRAFICOS,
+            key=f"grafico_ic_{chave}",
+            alt=f"Comparação populacional e IC de {titulo}",
+        )
+        escala = 100 if percentual else 1
+        unidade = "%" if percentual else " anos"
+        st.caption(
+            f"IC 95%: {num(ic['inferior'] * escala, 2)} a "
+            f"{num(ic['superior'] * escala, 2)}{unidade}"
+            f" · Amplitude: {num((ic['superior'] - ic['inferior']) * escala, 2)}"
+            f"{' p.p.' if percentual else ' anos'}"
+        )
         st.latex(formula)
 
 
@@ -160,15 +185,12 @@ ic_ia = intervalo_proporcao(
 )
 ic_exp = intervalo_media(amostra["WorkExp"], len(exp_pop))
 
-# Introdução: pergunta que organiza a narrativa do vídeo.
+# Introdução e identificação do estudo.
 st.caption("STACK OVERFLOW DEVELOPER SURVEY · 2025 / ESTATÍSTICA APLICADA")
-st.title(
-    f"O que {num(len(amostra))} respondentes revelam sobre uma população de "
-    f"{num(len(df))}?"
-)
+st.title("Amostragem e inferência estatística")
 st.write(
-    "Um estudo de amostragem aleatória, análise descritiva, "
-    "intervalos de confiança e testes de hipóteses."
+    "Análise descritiva da população e de uma amostra aleatória simples, "
+    "com intervalos de confiança e testes de hipóteses."
 )
 st.caption("01 Dimensionamento  ·  02 População × amostra  ·  03 Inferência")
 st.divider()
@@ -182,7 +204,7 @@ b.metric("Amostra inicial (n₀)", num(plano["n0"], 2), border=True)
 c.metric("Amostra calculada", num(plano["n_final"]), border=True)
 d.metric("Amostra ajustada", num(plano["n_ajustado"]), border=True)
 
-with st.container(border=True):
+with st.container(border=True, key="dimensionamento"):
     c1, c2, c3 = st.columns(3)
     with c1:
         st.markdown("**1. Fórmula inicial**")
@@ -272,10 +294,11 @@ testes = [
     },
 ]
 
-with PLOT_LOCK:
-    figura_testes = grafico_decisao_testes(testes)
-    st.pyplot(figura_testes, width="stretch", alt="Quatro testes de hipóteses, valores-p e decisões")
-    plt.close(figura_testes)
+st.plotly_chart(
+    grafico_decisao_testes(testes), width="stretch", theme=None,
+    config=CONFIG_GRAFICOS, key="grafico_decisao_testes",
+    alt="Quatro testes de hipóteses, valores-p e decisões",
+)
 
 st.divider()
 st.caption(
