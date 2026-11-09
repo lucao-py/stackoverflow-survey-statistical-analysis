@@ -1,7 +1,10 @@
 """Dashboard narrativo: população, amostra e inferência no Survey 2025."""
 
+import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from scipy.stats import gaussian_kde
 
 from src.dados import carregar_dados, URL_DADOS
 from src.amostragem import dimensionar_amostra, selecionar_amostra
@@ -56,9 +59,17 @@ IA_LABELS = {
 }
 
 
+
+@st.cache_data(show_spinner=False)
+def curva_distribuicao(serie):
+    """Curva KDE na escala percentual de um histograma de classes de 4 anos."""
+    valores = serie.dropna().astype(float).to_numpy()
+    eixo = np.linspace(0, 100, 400)
+    densidade = gaussian_kde(valores)(eixo)
+    return eixo, densidade * 400
+
+
 def painel_descritivo(base, titulo, cor):
-    # Mantém o formato original: população e amostra lado a lado,
-    # cada uma com seus próprios gráficos e detalhamento.
     experiencia = base["WorkExp"].dropna()
     ia = base["AISelect"].dropna()
 
@@ -71,18 +82,30 @@ def painel_descritivo(base, titulo, cor):
         c3.metric("Experiência média", f"{num(experiencia.mean(), 2)} anos")
         c4.metric("Mediana", f"{num(experiencia.median(), 1)} anos")
 
-        st.markdown("**Experiência profissional**")
-        fig = go.Figure(go.Histogram(
-            x=experiencia, nbinsx=25, histnorm="percent",
-            marker_color=cor,
-            hovertemplate="%{y:.1f}%<extra></extra>",
+        st.markdown("**Distribuição da experiência profissional**")
+        fig = go.Figure()
+        fig.add_trace(go.Histogram(
+            x=experiencia,
+            xbins=dict(start=0, end=104, size=4),
+            histnorm="percent", marker_color=cor,
+            opacity=0.28, name="Histograma",
+            hovertemplate="%{y:.2f}% no intervalo<extra></extra>",
+        ))
+        eixo, curva = curva_distribuicao(experiencia)
+        fig.add_trace(go.Scatter(
+            x=eixo, y=curva, mode="lines",
+            name="Curva de distribuição (KDE)",
+            line=dict(color=cor, width=3),
+            hovertemplate="%{x:.0f} anos: %{y:.2f}%<extra></extra>",
         ))
         fig.update_layout(
             xaxis_title="Anos de experiência",
-            yaxis_title="% das respostas válidas",
-            xaxis_range=[0, 100],
+            yaxis_title="% por intervalo de 4 anos",
+            xaxis_range=[0, 50],
+            legend=dict(orientation="h", x=0, y=1.12),
         )
-        st.plotly_chart(estilizar(fig, 260, legenda=False), width="stretch")
+        st.plotly_chart(estilizar(fig, 320, legenda=True), width="stretch")
+        st.caption("Curva suavizada · recorte visual até 50 anos; métricas usam todos os valores.")
 
         st.markdown("**Frequência de utilização de IA**")
         frequencias = (
@@ -128,8 +151,7 @@ def painel_descritivo(base, titulo, cor):
 
             paises = base["Country"].value_counts().head(8)
             fig = go.Figure(go.Bar(
-                x=paises.values, y=paises.index,
-                orientation="h", marker_color=cor,
+                x=paises.values, y=paises.index, orientation="h", marker_color=cor,
             ))
             fig.update_layout(
                 xaxis_title="Respondentes",
