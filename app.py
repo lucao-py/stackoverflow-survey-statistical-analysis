@@ -260,24 +260,37 @@ def painel_intervalo(titulo, ic, parametro, escala, formula):
         st.latex(formula)
 
 
-def painel_teste(numero, titulo, metodo, h0, h1, referencia, estimativa, resultado, conclusao):
-    valor_p = resultado["valor_p"]
-    rejeita = resultado["rejeitar_h0"]
-    estat = resultado["z"] if metodo == "Z" else resultado["t"]
-    with st.container(border=True):
-        st.caption(f"TESTE {numero} · {metodo}")
-        st.markdown(f"#### {titulo}")
-        a, b, c = st.columns(3)
-        a.metric("Estimativa", estimativa)
-        b.metric("Referência", referencia)
-        c.metric("Valor-p", p_texto(valor_p))
-        st.markdown(f"**H₀:** {h0}　　**H₁:** {h1}")
-        st.caption(
-            f"Estatística {metodo} = {num(estat, 3)} · α = 0,05"
-        )
-        st.markdown(
-            f"**{'Rejeitamos' if rejeita else 'Não rejeitamos'} H₀.** {conclusao}"
-        )
+
+def grafico_testes(tabela):
+    # Escala -log10 torna visíveis também os valores-p muito pequenos.
+    forca = -np.log10(np.maximum(tabela["p"].to_numpy(dtype=float), 1e-12))
+    cores = [AMOSTRA if decisoes else POP for decisoes in tabela["Rejeita"]]
+    fig = go.Figure(go.Bar(
+        x=forca, y=tabela["Teste"], orientation="h",
+        marker_color=cores, text=tabela["Valor-p"],
+        textposition="outside", cliponaxis=False,
+        customdata=tabela["p"],
+        hovertemplate="Valor-p: %{customdata:.5g}<extra></extra>",
+    ))
+    fig.add_vline(
+        x=-np.log10(0.05), line_color=REAL,
+        line_dash="dash", line_width=2,
+        annotation_text="α = 0,05", annotation_position="top right",
+    )
+    limite = max(2.6, float(forca.max()) * 1.25)
+    fig.update_layout(
+        xaxis=dict(
+            title="Força da evidência (−log₁₀ valor-p)",
+            range=[0, limite], zeroline=False,
+        ),
+        yaxis=dict(
+            categoryorder="array",
+            categoryarray=list(reversed(tabela["Teste"].tolist())),
+            automargin=True,
+        ),
+        margin=dict(l=20, r=50, t=23, b=20),
+    )
+    return estilizar(fig, 330, legenda=False)
 
 
 # Dados e seleção amostral.
@@ -379,37 +392,37 @@ p2 = teste_proporcao(
 m1 = teste_media(amostra["WorkExp"], len(exp_pop), mu0=10, alternativa="maior")
 m2 = teste_media(amostra["WorkExp"], len(exp_pop), mu0=15, alternativa="diferente")
 
-a, b = st.columns(2)
-with a:
-    painel_teste(
-        "01", "Uso de IA > 75%?", "Z", "p ≤ 75%", "p > 75%",
-        "75%", pct(p1["proporcao"]), p1,
-        ("Há evidência de uso superior a 75%." if p1["rejeitar_h0"]
-         else "Evidência insuficiente de uso superior a 75%."),
-    )
-with b:
-    painel_teste(
-        "02", "Uso diário de IA > 40%?", "Z", "p ≤ 40%", "p > 40%",
-        "40%", pct(p2["proporcao"]), p2,
-        ("Há evidência de uso diário superior a 40%." if p2["rejeitar_h0"]
-         else "Evidência insuficiente de uso diário superior a 40%."),
-    )
 
-a, b = st.columns(2)
-with a:
-    painel_teste(
-        "03", "Experiência média > 10 anos?", "t", "μ ≤ 10", "μ > 10",
-        "10 anos", f"{num(m1['estimativa'], 2)} anos", m1,
-        ("Há evidência de média superior a 10 anos." if m1["rejeitar_h0"]
-         else "Evidência insuficiente de média superior a 10 anos."),
-    )
-with b:
-    painel_teste(
-        "04", "Experiência média ≠ 15 anos?", "t", "μ = 15", "μ ≠ 15",
-        "15 anos", f"{num(m2['estimativa'], 2)} anos", m2,
-        ("Há evidência de média diferente de 15 anos." if m2["rejeitar_h0"]
-         else "Evidência insuficiente de média diferente de 15 anos."),
-    )
+resultados = [
+    ("Uso de IA > 75%", "p ≤ 75%", "p > 75%", "Z", p1),
+    ("Uso diário de IA > 40%", "p ≤ 40%", "p > 40%", "Z", p2),
+    ("Experiência média > 10", "μ ≤ 10", "μ > 10", "t", m1),
+    ("Experiência média ≠ 15", "μ = 15", "μ ≠ 15", "t", m2),
+]
+tabela = pd.DataFrame([
+    {
+        "Teste": nome,
+        "H₀": h0,
+        "H₁": h1,
+        "Método": metodo,
+        "Estatística": num(r["z"] if metodo == "Z" else r["t"], 3),
+        "p": r["valor_p"],
+        "Valor-p": p_texto(r["valor_p"]),
+        "Rejeita": r["rejeitar_h0"],
+        "Decisão": "Rejeita H₀" if r["rejeitar_h0"] else "Não rejeita H₀",
+    }
+    for nome, h0, h1, metodo, r in resultados
+])
+
+st.plotly_chart(grafico_testes(tabela), width="stretch")
+st.caption(
+    "Barra verde: rejeita H₀ · cinza: não rejeita H₀ · "
+    "linha amarela: α = 5%. Barras maiores representam valores-p menores."
+)
+st.dataframe(
+    tabela[["Teste", "H₀", "H₁", "Método", "Estatística", "Valor-p", "Decisão"]],
+    hide_index=True, width="stretch",
+)
 
 st.divider()
 st.caption(
