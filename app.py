@@ -160,98 +160,102 @@ def painel_descritivo(base, titulo, cor):
             st.plotly_chart(estilizar(fig, 280, legenda=False), width="stretch")
 
 
-def grafico_intervalo(ic, populacao, escala, unidade):
-    li = ic["inferior"] * escala
-    centro = ic["estimativa"] * escala
-    ls = ic["superior"] * escala
-    real = populacao * escala
 
-    # Uma escala legível, com espaço para enxergar o comprimento do IC.
-    largura = ls - li
-    folga = max(largura * 0.8, 2 if escala == 100 else 0.5)
-    minimo = min(li, real) - folga
-    maximo = max(ls, real) + folga
+def grafico_intervalo(ic, populacao, escala):
+    """Barra horizontal flutuante: o preenchimento é exatamente o IC."""
+    li = ic["inferior"] * escala
+    ponto = ic["estimativa"] * escala
+    ls = ic["superior"] * escala
+    referencia = populacao * escala
+    amplitude = ls - li
+
+    # Escala aproximada para distinguir claramente os dois extremos.
+    folga = max(amplitude * 0.5, 1 if escala == 100 else 0.3)
+    x_min, x_max = min(li, referencia) - folga, max(ls, referencia) + folga
+    unidade = "%" if escala == 100 else " anos"
 
     fig = go.Figure()
-
-    # Área destacada e linha do intervalo: os dois limites ficam evidentes.
-    fig.add_vrect(
-        x0=li, x1=ls, fillcolor="rgba(45, 212, 191, 0.12)",
-        line_width=0, layer="below",
-    )
-    fig.add_trace(go.Scatter(
-        x=[li, ls], y=[0, 0], mode="lines+markers",
-        line=dict(color=AMOSTRA, width=11),
-        marker=dict(size=14, color=AMOSTRA),
-        hovertemplate="%{x:.2f}<extra>Limite do IC</extra>",
+    fig.add_trace(go.Bar(
+        x=[amplitude], base=[li], y=[0], orientation="h", width=0.36,
+        marker=dict(color=AMOSTRA, line=dict(color=AMOSTRA, width=2)),
+        name="Intervalo de 95%",
+        customdata=[[li, ponto, ls]],
+        hovertemplate=(
+            "IC 95%: %{customdata[0]:.2f} a %{customdata[2]:.2f}"
+            "<br>Estimativa: %{customdata[1]:.2f}<extra></extra>"
+        ),
         showlegend=False,
     ))
     fig.add_trace(go.Scatter(
-        x=[centro], y=[0], mode="markers",
-        marker=dict(size=20, color="white", line=dict(color=AMOSTRA, width=4)),
-        hovertemplate="%{x:.2f}<extra>Estimativa amostral</extra>",
+        x=[ponto], y=[0], mode="markers",
+        marker=dict(symbol="diamond", size=17, color="white",
+                    line=dict(color="#0E1117", width=2)),
+        hovertemplate="Estimativa: %{x:.2f}<extra></extra>",
         showlegend=False,
     ))
-    fig.add_vline(x=real, line_color=REAL, line_width=3, line_dash="dash")
+    fig.add_vline(x=referencia, line_color=REAL, line_dash="dash", line_width=3)
 
-    for x, valor, posicao in [
-        (li, li, "left"), (ls, ls, "right")
-    ]:
+    # Extremidades com marcas e valores explícitos, sem depender do hover.
+    for extremo, ancora in [(li, "right"), (ls, "left")]:
+        fig.add_trace(go.Scatter(
+            x=[extremo, extremo], y=[-0.23, 0.23],
+            mode="lines", line=dict(color="#E5E7EB", width=3),
+            hoverinfo="skip", showlegend=False,
+        ))
         fig.add_annotation(
-            x=x, y=0.24,
-            text=f"<b>{num(valor, 2)}{unidade}</b>",
-            showarrow=False,
-            xanchor=posicao, font=dict(color=AMOSTRA, size=16),
+            x=extremo, y=0.44,
+            text=f"<b>{num(extremo, 2)}{unidade}</b>",
+            xanchor=ancora, showarrow=False,
+            font=dict(size=15, color="#E5E7EB"),
         )
-
+    fig.add_annotation(
+        x=ponto, y=-0.47, text=f"Estimativa: {num(ponto, 2)}{unidade}",
+        showarrow=False, font=dict(size=13, color="#E5E7EB"),
+    )
     fig.update_layout(
         xaxis=dict(
-            title=f"Escala em {unidade}",
-            range=[minimo, maximo],
-            ticksuffix=unidade,
-            tickfont=dict(size=13),
-            gridcolor="rgba(148,163,184,0.18)",
-            zeroline=False,
+            title="Proporção (%)" if escala == 100 else "Experiência (anos)",
+            range=[x_min, x_max],
+            ticksuffix="%" if escala == 100 else "",
+            tickfont=dict(size=13), zeroline=False,
         ),
-        yaxis=dict(visible=False, range=[-0.55, 0.55]),
-        margin=dict(l=12, r=12, t=25, b=20),
-        hovermode="closest",
+        yaxis=dict(
+            range=[-0.85, 0.85], tickvals=[0], ticktext=["IC 95%"],
+            showgrid=False,
+        ),
+        margin=dict(l=38, r=30, t=12, b=22),
     )
-    return estilizar(fig, 280, legenda=False)
+    return estilizar(fig, 310, legenda=False)
 
 
-def painel_intervalo(titulo, ic, parametro, escala, unidade, formula):
+def painel_intervalo(titulo, ic, parametro, escala, formula):
     fmt = pct if escala == 100 else lambda v: f"{num(v, 2)} anos"
     largura = ic["superior"] - ic["inferior"]
     margem = largura / 2
-
     with st.container(border=True):
         st.markdown(f"#### {titulo}")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Limite inferior", fmt(ic["inferior"]))
-        c2.metric("Estimativa", fmt(ic["estimativa"]))
-        c3.metric("Limite superior", fmt(ic["superior"]))
+        st.plotly_chart(
+            grafico_intervalo(ic, parametro, escala), width="stretch"
+        )
 
-        # Largura numérica e representação na mesma seção.
+        a, b, c = st.columns(3)
+        a.metric("Limite inferior", fmt(ic["inferior"]))
+        b.metric("Estimativa amostral", fmt(ic["estimativa"]))
+        c.metric("Limite superior", fmt(ic["superior"]))
         if escala == 100:
-            st.markdown(
-                f"**Amplitude: {num(largura * 100, 2)} pontos percentuais** "
-                f"· margem: ±{num(margem * 100, 2)} p.p."
+            st.caption(
+                f"Amplitude do IC: {num(largura * 100, 2)} p.p. "
+                f"· margem de erro: ±{num(margem * 100, 2)} p.p."
             )
         else:
-            st.markdown(
-                f"**Amplitude: {num(largura, 2)} anos** "
-                f"· margem: ±{num(margem, 2)} anos"
+            st.caption(
+                f"Amplitude do IC: {num(largura, 2)} anos "
+                f"· margem de erro: ±{num(margem, 2)} anos"
             )
-
-        st.plotly_chart(
-            grafico_intervalo(ic, parametro, escala, unidade),
-            width="stretch",
-        )
         st.caption(
-            f"Verde: IC 95% · branco: estimativa · "
-            f"amarelo tracejado: população ({fmt(parametro)}) · "
-            f"n válido: {num(ic['n'])}"
+            f"Barra verde = IC 95% · losango branco = estimativa · "
+            f"linha amarela = população ({fmt(parametro)}) · "
+            f"n válido = {num(ic['n'])}"
         )
         st.latex(formula)
 
@@ -351,12 +355,12 @@ st.header("03 / Inferência estatística")
 st.subheader("Intervalos de confiança · 95%")
 
 painel_intervalo(
-    "Proporção que utiliza IA", ic_ia, p_pop, 100, "%",
+    "Proporção que utiliza IA", ic_ia, p_pop, 100,
     r"IC_p=\hat p\ \pm\ z_{0{,}975}"
     r"\sqrt{\frac{\hat p(1-\hat p)}{n}\cdot\frac{N-n}{N-1}}",
 )
 painel_intervalo(
-    "Média de experiência profissional", ic_exp, exp_pop.mean(), 1, "",
+    "Média de experiência profissional", ic_exp, exp_pop.mean(), 1,
     r"IC_\mu=\bar x\ \pm\ t_{0{,}975;\,n-1}"
     r"\frac{s}{\sqrt n}\sqrt{\frac{N-n}{N-1}}",
 )
