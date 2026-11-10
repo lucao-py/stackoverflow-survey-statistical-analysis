@@ -1,9 +1,11 @@
 """Dashboard narrativo: população, amostra e inferência no Survey 2025."""
 
+from html import escape
+
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
-from scipy.stats import gaussian_kde
+from scipy.stats import gaussian_kde, norm, t
 
 from src.dados import carregar_dados, URL_DADOS
 from src.visualizacoes import (
@@ -39,6 +41,16 @@ st.html("""
     font-variant-numeric: tabular-nums;
     line-height: 1.3;
 }
+.legenda-formula {
+    color: #7C8592;
+    font-size: 0.78rem;
+    line-height: 1.6;
+    margin: 0.2rem 0 0.5rem;
+}
+.legenda-formula span {
+    display: block;
+    margin-top: 0.3rem;
+}
 </style>
 """)
 
@@ -53,6 +65,13 @@ def pct(valor):
 
 def p_texto(valor):
     return "< 0,0001" if valor < 0.0001 else num(valor, 4)
+
+
+def legenda_formula(explicacao, variaveis):
+    st.html(
+        f'<p class="legenda-formula">{escape(explicacao)}'
+        f'<span>{escape(variaveis)}</span></p>'
+    )
 
 
 IA_LABELS = {
@@ -87,6 +106,8 @@ def painel_descritivo(base, titulo, cor):
         c3, c4 = st.columns(2)
         c3.metric("Experiência média", f"{num(experiencia.mean(), 2)} anos")
         c4.metric("Mediana", f"{num(experiencia.median(), 1)} anos")
+        desvio = experiencia.std(ddof=0 if chave == "populacao" else 1)
+        st.caption(f"Desvio-padrão da experiência: **{num(desvio, 2)} anos**")
 
         st.markdown("**Distribuição da experiência profissional**")
         fig = go.Figure()
@@ -148,7 +169,7 @@ def painel_descritivo(base, titulo, cor):
         )
 
 
-def mostrar_ic(titulo, ic, populacao, percentual, formula):
+def mostrar_ic(titulo, ic, populacao, percentual, formula, explicacao, variaveis):
     """Exibe as barras horizontais no formato da referência, sem cards de KPIs."""
     chave = "proporcao" if percentual else "media"
     with st.container(border=True, key=f"painel_ic_{chave}"):
@@ -167,7 +188,16 @@ def mostrar_ic(titulo, ic, populacao, percentual, formula):
             f" · Amplitude: {num((ic['superior'] - ic['inferior']) * escala, 2)}"
             f"{' p.p.' if percentual else ' anos'}"
         )
+        diferenca = round((ic["estimativa"] - populacao) * escala, 2)
+        sinal = "+" if diferenca > 0 else ""
+        contem = ic["inferior"] <= populacao <= ic["superior"]
+        st.caption(
+            f"Diferença amostra − população: {sinal}{num(diferenca, 2)}"
+            f"{' p.p.' if percentual else ' anos'}; valor populacional "
+            f"{'dentro' if contem else 'fora'} do IC."
+        )
         st.latex(formula)
+        legenda_formula(explicacao, variaveis)
 
 
 # Dados e seleção amostral.
@@ -192,6 +222,19 @@ st.write(
     "Análise descritiva da população e de uma amostra aleatória simples, "
     "com intervalos de confiança e testes de hipóteses."
 )
+with st.expander("Sobre a base de dados", expanded=False):
+    st.caption(
+        "Fonte: [Stack Overflow Developer Survey 2025]"
+        "(https://survey.stackoverflow.co/2025/) · "
+        f"[CSV utilizado]({URL_DADOS}) · "
+        f"{num(df.shape[0])} observações · {num(df.shape[1])} variáveis."
+    )
+    st.caption(
+        "População: registros da pesquisa presentes no CSV utilizado. "
+        "Unidade amostral: respondente individual. "
+        "Variáveis centrais: `AISelect` (qualitativa, frequência de uso de IA) "
+        "e `WorkExp` (quantitativa, anos de experiência profissional)."
+    )
 st.caption("01 Dimensionamento  ·  02 População × amostra  ·  03 Inferência")
 st.divider()
 
@@ -209,17 +252,31 @@ with st.container(border=True, key="dimensionamento"):
     with c1:
         st.markdown("**1. Fórmula inicial**")
         st.latex(r"n_0=\frac{Z^2p(1-p)}{E^2}")
-        st.caption("Z = 1,96 · p = 0,50 · E = 0,05")
+        legenda_formula(
+            "Calcula o tamanho inicial da amostra para estimar uma proporção "
+            "com 95% de confiança e margem de erro de 5 pontos percentuais.",
+            f"Z = 1,96 (valor crítico) · p = 0,50 (proporção conservadora) · "
+            f"E = 0,05 (erro tolerado) · n₀ = {num(plano['n0'], 2)}.",
+        )
     with c2:
         st.markdown("**2. Correção finita**")
         st.latex(r"n=\frac{N n_0}{N+n_0-1}")
-        st.caption(f"n = {num(plano['n_corrigido'], 2)} → {num(plano['n_final'])}")
+        legenda_formula(
+            "Reduz o tamanho inicial para considerar que a população é finita; "
+            "o resultado é arredondado para cima.",
+            f"N = {num(plano['N'])} (população) · "
+            f"n₀ = {num(plano['n0'], 2)} (tamanho inicial) · "
+            f"n = {num(plano['n_corrigido'], 2)} → {num(plano['n_final'])} respondentes.",
+        )
     with c3:
         st.markdown("**3. Ajuste por respostas válidas**")
         st.latex(r"n_{\mathrm{aj}}=\left\lceil\frac{n}{r_{IA}}\right\rceil")
-        st.caption(
-            f"rIA = {pct(plano['taxa_validas'])} · "
-            f"n ajustado = {num(plano['n_ajustado'])}"
+        legenda_formula(
+            "Amplia a seleção para compensar respostas ausentes sobre IA. "
+            "A quantidade de respostas válidas é esperada, não garantida.",
+            f"n = {num(plano['n_final'])} (meta de respostas válidas) · "
+            f"rIA = {pct(plano['taxa_validas'])} (taxa de respostas válidas na base) · "
+            f"n ajustado = {num(plano['n_ajustado'])}. O símbolo ⌈ ⌉ arredonda para cima.",
         )
 
 st.divider()
@@ -245,11 +302,26 @@ mostrar_ic(
     "Proporção que utiliza IA", ic_ia, p_pop, True,
     r"IC_p=\hat p\ \pm\ z_{0{,}975}"
     r"\sqrt{\frac{\hat p(1-\hat p)}{n}\cdot\frac{N-n}{N-1}}",
+    "Estima uma faixa de confiança de 95% para a proporção que utiliza IA: "
+    "a proporção da amostra mais ou menos uma margem de erro, com correção finita.",
+    f"p̂ = {pct(ic_ia['estimativa'])} (proporção amostral) · "
+    f"z₀,₉₇₅ = {num(norm.ppf(0.975), 2)} (valor crítico) · "
+    f"n = {num(ic_ia['n'])} (respostas válidas na amostra) · "
+    f"N = {num(len(ia_pop))} (respostas válidas na população).",
 )
 mostrar_ic(
     "Média de experiência profissional", ic_exp, exp_pop.mean(), False,
     r"IC_\mu=\bar x\ \pm\ t_{0{,}975;\,n-1}"
-    r"\frac{s}{\sqrt n}\sqrt{\frac{N-n}{N-1}}",
+    r"\frac{s}{\sqrt n}\sqrt{\frac{N-n}{N}}",
+    "Estima uma faixa de confiança de 95% para a experiência média: "
+    "a média da amostra mais ou menos uma margem de erro, usando t de Student "
+    "e correção finita.",
+    f"x̄ = {num(ic_exp['estimativa'], 2)} anos (média amostral) · "
+    f"s = {num(amostra['WorkExp'].std(ddof=1), 2)} anos (desvio-padrão amostral) · "
+    f"n = {num(ic_exp['n'])} (respostas válidas na amostra) · "
+    f"N = {num(len(exp_pop))} (respostas válidas na população) · "
+    f"t₀,₉₇₅ = {num(t.ppf(0.975, df=ic_exp['n'] - 1), 3)} "
+    f"(valor crítico, {num(ic_exp['n'] - 1)} graus de liberdade).",
 )
 
 st.divider()
@@ -299,6 +371,32 @@ st.plotly_chart(
     config=CONFIG_GRAFICOS, key="grafico_decisao_testes",
     alt="Quatro testes de hipóteses, valores-p e decisões",
 )
+
+with st.expander("Notas metodológicas", expanded=False):
+    st.markdown(
+        "- **Referências exploratórias:** 75% para uso de IA e 40% para uso "
+        "diário contrastam adoção ampla e rotina; 10 e 15 anos situam a "
+        "experiência média. São valores redondos de comparação, não limites oficiais.\n"
+        "- **Condições:** seleção aleatória sem reposição, com correção finita. "
+        "O teste Z exige contagens esperadas de sucessos e insucessos "
+        "suficientemente grandes sob H₀; o IC da proporção usa as contagens "
+        "observadas. Para a média, usa-se t com n−1 graus de liberdade e "
+        "aproximação pelo teorema central do limite em amostras grandes.\n"
+        "- **Ausentes e denominadores:** exclusão por variável, sem imputação. "
+        f"IA: {num(ic_ia['n'])} respostas válidas na amostra e "
+        f"{num(len(ia_pop))} na população; experiência: {num(ic_exp['n'])} e "
+        f"{num(len(exp_pop))}, respectivamente. As barras de frequência de IA "
+        "incluem ‘Sem resposta’ e usam o total de registros de cada painel.\n"
+        "- **Variabilidade:** outra amostra pode produzir estimativas, ICs e "
+        "decisões diferentes. Os ICs e testes usam apenas os valores da amostra; "
+        "os parâmetros populacionais servem à comparação. As quatro hipóteses "
+        "são exploratórias, sem ajuste para comparações múltiplas.\n"
+        "- **Alcance e fonte:** a pesquisa é voluntária; a AAS deste projeto "
+        "representa o CSV, não todos os desenvolvedores. O "
+        "[relatório oficial](https://survey.stackoverflow.co/2025/methodology) "
+        "possui uma base de divulgação distinta; os números deste painel "
+        "são calculados diretamente do arquivo utilizado."
+    )
 
 st.divider()
 st.caption(

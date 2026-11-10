@@ -7,9 +7,10 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+from scipy.stats import t
 from streamlit.testing.v1 import AppTest
 
-from src.estatisticas import intervalo_proporcao
+from src.estatisticas import intervalo_media, intervalo_proporcao, teste_media
 from src.visualizacoes import grafico_decisao_testes, grafico_ic_barras
 
 
@@ -105,6 +106,40 @@ class EstruturaDashboardTest(unittest.TestCase):
         self.assertEqual(len(at.latex), 5)
         self.assertEqual(len(at.get("plotly_chart")), 7)
         self.assertEqual(len(at.get("imgs")), 0)
+        self.assertEqual([exp.label for exp in at.expander], [
+            "Sobre a base de dados", "Notas metodológicas",
+        ])
+        self.assertTrue(all(not exp.proto.expanded for exp in at.expander))
+
+        legendas = [caption.value for caption in at.caption]
+        contexto = next(texto for texto in legendas if "observações" in texto)
+        self.assertIn("1.200 observações", contexto)
+        self.assertIn("2 variáveis", contexto)
+        self.assertEqual(sum("Desvio-padrão da experiência:" in x for x in legendas), 2)
+        self.assertEqual(sum("Diferença amostra − população:" in x for x in legendas), 2)
+
+
+class CorrecaoFinitaMediaTest(unittest.TestCase):
+    def test_intervalo_usa_variancia_amostral_e_fracao_amostral(self):
+        # s² = 4, n = 3, N = 10: Var estimada da média = (1-3/10)*4/3.
+        valores = pd.Series([2.0, 4.0, 6.0, np.nan])
+        variancia_media = (1 - 3 / 10) * 4 / 3
+        margem = t.ppf(0.975, df=2) * np.sqrt(variancia_media)
+        ic = intervalo_media(valores, N=10)
+
+        self.assertEqual(ic["n"], 3)
+        self.assertAlmostEqual(ic["inferior"], 4 - margem)
+        self.assertAlmostEqual(ic["superior"], 4 + margem)
+
+    def test_testes_t_usam_o_mesmo_erro_padrao_do_intervalo(self):
+        valores = pd.Series([2.0, 4.0, 6.0, np.nan])
+        estatistica = (4 - 3) / np.sqrt((1 - 3 / 10) * 4 / 3)
+
+        for alternativa, fator in (("maior", 1), ("diferente", 2)):
+            with self.subTest(alternativa=alternativa):
+                resultado = teste_media(valores, N=10, mu0=3, alternativa=alternativa)
+                self.assertAlmostEqual(resultado["t"], estatistica)
+                self.assertAlmostEqual(resultado["valor_p"], fator * t.sf(estatistica, df=2))
 
 
 if __name__ == "__main__":

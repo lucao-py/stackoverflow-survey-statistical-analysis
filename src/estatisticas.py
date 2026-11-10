@@ -40,8 +40,8 @@ def intervalo_media(valores, N, confianca=0.95):
         df=n - 1
     )
 
-    # Erro-padrão com correção finita
-    correcao = math.sqrt((N - n) / (N - 1))
+    # s² usa divisor n-1: sob AAS, Var(média) é estimada por (1-n/N)s²/n.
+    correcao = math.sqrt((N - n) / N)
     erro_padrao = (desvio / math.sqrt(n)) * correcao
 
     margem = t_critico * erro_padrao
@@ -79,10 +79,8 @@ def teste_media(valores, N, mu0, alternativa="maior", alfa=0.05):
     media = valores.mean()
     desvio = valores.std(ddof=1)
 
-    # Erro-padrão com correção finita
-    erro_padrao = (desvio / math.sqrt(n)) * math.sqrt(
-        (N - n) / (N - 1)
-    )
+    # Mesma correção finita do IC da média, compatível com s² (ddof=1).
+    erro_padrao = (desvio / math.sqrt(n)) * math.sqrt((N - n) / N)
 
     # Estatística do teste
     t_calculado = (media - mu0) / erro_padrao
